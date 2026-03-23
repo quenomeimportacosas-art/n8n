@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: n8n
+    env: docker
+    plan: free
+    envVars:
+      - key: DB_TYPE
+        value: postgresdb
+      - key: DB_POSTGRESDB_DATABASE
+        value: postgres
+      - key: DB_POSTGRESDB_HOST
+        value: db.dnbksebxogreauqsszrj.supabase.co
+      - key: DB_POSTGRESDB_PORT
+        value: "5432"
+      - key: DB_POSTGRESDB_USER
+        value: postgres
+      - key: DB_POSTGRESDB_PASSWORD
+        value: sd088359zVITFu1C
+      - key: N8N_ENCRYPTION_KEY
+        value: secure_n8n_key_777_qwerty
+      - key: WEBHOOK_URL
+        # Es preferible que reemplaces esto con tu URL de Render una vez que esté publicado
+        value: "https://n8n.onrender.com"
