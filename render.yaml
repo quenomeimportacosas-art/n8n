@@ -20,6 +20,12 @@ services:
         value: postgres
       - key: DB_POSTGRESDB_PASSWORD
         value: sd088359zVITFu1C
+      - key: DB_POSTGRESDB_SSL_ENABLED       
+        value: "true"
+      - key: DB_POSTGRESDB_SSL_REJECT_UNAUTHORIZED
+        value: "false"
+      - key: DB_POSTGRESDB_SSL
+        value: "true"
       - key: N8N_ENCRYPTION_KEY
         value: secure_n8n_key_777_qwerty
       - key: WEBHOOK_URL
