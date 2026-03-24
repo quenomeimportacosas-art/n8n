@@ -1,0 +1,466 @@
+{
+  "name": "Rosecal - 01 - Secuencia de Emails Diarios",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "minutesInterval": 1,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger - 9AM Diario",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "options": {
+          "continueIfEmpty": false
+        }
+      },
+      "id": "read-leads",
+      "name": "Leer Leads desde Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.estado }}",
+              "rightValue": "excluido",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "cond-2",
+              "leftValue": "={{ $json.estado }}",
+              "rightValue": "respondio",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-active",
+      "name": "Filtrar Leads Activos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.estado }}",
+              "rightValue": "pendiente",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-pendiente",
+      "name": "¿Estado = Pendiente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [850, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.estado }}",
+              "rightValue": "email1_enviado",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond-2",
+              "leftValue": "={{ DateTime.now().diff(DateTime.fromISO($json.fecha_ultimo_contacto), 'days').days }}",
+              "rightValue": 6,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-email1",
+      "name": "¿Email 1 + 6 dias?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.estado }}",
+              "rightValue": "email2_enviado",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond-2",
+              "leftValue": "={{ DateTime.now().diff(DateTime.fromISO($json.fecha_ultimo_contacto), 'days').days }}",
+              "rightValue": 7,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-email2",
+      "name": "¿Email 2 + 7 dias?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "prompt": "=Sos un ejecutivo de ventas de Rosecal, fabricante argentino de indumentaria de trabajo.\n\nTu tarea es escribir el cuerpo de un email que parezca de un proveedor que retoma contacto, no de alguien que vende por primera vez.\n\nREGLAS:\n- Máximo 75 palabras en el cuerpo\n- NO uses: \"me complace\", \"espero que estés bien\", \"adjunto catálogo\", \"oferta especial\"\n- Mencioná el rubro de la empresa de forma natural (ej: \"empresas de construcción\", \"plantas frigoríficas\")\n- Terminá con UNA sola pregunta sobre cuándo o si están por comprar\n- Tono: directo, argentino, sin venta agresiva\n\nDATOS:\nEmpresa: {{ $json.empresa }}\nNombre contacto: {{ $json.nombre_contacto }}\nRubro: {{ $json.rubro }}\nZona: {{ $json.zona }}\n\nOUTPUT: Solo el cuerpo del email. Sin asunto, sin firma."
+      },
+      "id": "ai-email-1",
+      "name": "Personalizar Email 1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "prompt": "=Sos un ejecutivo de ventas de Rosecal, fabricante argentino de indumentaria de trabajo.\n\nEscribí un email corto de seguimiento al email enviado hace 6 días. El tono debe ser: \"¿Llegó bien mi mensaje?\"\n\nREGLAS:\n- Máximo 50 palabras\n- Mencioná que reenviás el mensaje por si no llegó (spam)\n- Preguntá si es correcta la dirección o si hay alguien más indicado\n- Tono: simple, directo\n\nDATOS:\nEmpresa: {{ $json.empresa }}\nNombre contacto: {{ $json.nombre_contacto }}\n\nOUTPUT: Solo el cuerpo del email. Sin firma."
+      },
+      "id": "ai-email-2",
+      "name": "Personalizar Email 2",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "prompt": "=Sos un ejecutivo de ventas de Rosecal, fabricante argentino de indumentaria de trabajo.\n\nEscribí un email de \"último intento\" buscando al responsable correcto de compras.\n\nREGLAS:\n- Máximo 60 palabras\n- Explicá que intentaste contactar a {{ $json.nombre_contacto }} pero no tuviste respuesta\n- Preguntá quién es la persona adecuada\n- Mencioná que son fabricantes directos y trabajan con empresas del sector {{ $json.rubro }}\n- Tono: cortés pero directo\n\nDATOS:\nEmpresa: {{ $json.empresa }}\nRubro: {{ $json.rubro }}\n\nOUTPUT: Solo el cuerpo del email. Sin firma."
+      },
+      "id": "ai-email-3",
+      "name": "Personalizar Email 3",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1100, 500]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_contacto }}",
+        "subject": "=Indumentaria de trabajo — {{ $json.empresa }}",
+        "body": "=Hola {{ $json.nombre_contacto }},\n\n{{ $from_ai.text }}\n\nSaludos,\n{{ $env.NOMBRE_VENDEDOR }}\nEjecutivo de ventas — Rosecal\n{{ $env.TELEFONO_VENDEDOR }}",
+        "options": {}
+      },
+      "id": "send-email-1",
+      "name": "Enviar Email 1",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1350, 100]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_contacto }}",
+        "subject": "=Re: Indumentaria de trabajo — {{ $json.empresa }}",
+        "body": "=Hola {{ $json.nombre_contacto }},\n\n{{ $from_ai.text }}\n\n{{ $env.NOMBRE_VENDEDOR }}\nRosecal — {{ $env.TELEFONO_VENDEDOR }}",
+        "options": {}
+      },
+      "id": "send-email-2",
+      "name": "Enviar Email 2",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.web ? 'info@' + $json.web.replace(/^https?:\\/\\//, '').replace(/^www\\./, '').split('/')[0] : $json.email_contacto }}",
+        "subject": "=Indumentaria de trabajo — ¿con quién coordino?",
+        "body": "=Buen día,\n\n{{ $from_ai.text }}\n\nMuchas gracias,\n{{ $env.NOMBRE_VENDEDOR }}\nRosecal — {{ $env.TELEFONO_VENDEDOR }}",
+        "options": {}
+      },
+      "id": "send-email-3",
+      "name": "Enviar Email 3",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1350, 500]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMap",
+          "value": {
+            "estado": "email1_enviado",
+            "email_enviado_1": "=Si",
+            "fecha_ultimo_contacto": "={{ DateTime.now().toISO() }}"
+          },
+          "matchingColumns": ["email_contacto"]
+        }
+      },
+      "id": "update-status-1",
+      "name": "Actualizar Estado - Email 1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1600, 100]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMap",
+          "value": {
+            "estado": "email2_enviado",
+            "email_enviado_2": "=Si",
+            "fecha_ultimo_contacto": "={{ DateTime.now().toISO() }}"
+          },
+          "matchingColumns": ["email_contacto"]
+        }
+      },
+      "id": "update-status-2",
+      "name": "Actualizar Estado - Email 2",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMap",
+          "value": {
+            "estado": "email3_enviado",
+            "email_enviado_3": "=Si",
+            "fecha_ultimo_contacto": "={{ DateTime.now().toISO() }}"
+          },
+          "matchingColumns": ["email_contacto"]
+        }
+      },
+      "id": "update-status-3",
+      "name": "Actualizar Estado - Email 3",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1600, 500]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger - 9AM Diario": {
+      "main": [
+        [
+          {
+            "node": "Leer Leads desde Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Leads desde Sheets": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Leads Activos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Leads Activos": {
+      "main": [
+        [
+          {
+            "node": "¿Estado = Pendiente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Estado = Pendiente?": {
+      "main": [
+        [
+          {
+            "node": "Personalizar Email 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Email 1 + 6 dias?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Email 1 + 6 dias?": {
+      "main": [
+        [
+          {
+            "node": "Personalizar Email 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Email 2 + 7 dias?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Email 2 + 7 dias?": {
+      "main": [
+        [
+          {
+            "node": "Personalizar Email 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Personalizar Email 1": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Personalizar Email 2": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Personalizar Email 3": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Email 1": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Estado - Email 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Email 2": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Estado - Email 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Email 3": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Estado - Email 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["rosecal", "emails", "lead-gen"]
+}

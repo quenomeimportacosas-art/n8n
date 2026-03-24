@@ -1,0 +1,263 @@
+{
+  "name": "Rosecal - 04 - Búsqueda Apollo.io",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 168,
+              "triggerAtHour": 10
+            }
+          ]
+        }
+      },
+      "id": "schedule-weekly",
+      "name": "Schedule - Semanal Lunes 10AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apollo.io/v1/mixed_people/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({\n  \"q_organization_domains\": [],\n  \"organization_locations\": [\"Argentina\"],\n  \"person_locations\": [\"Argentina\"],\n  \"contact_email_status\": [\"verified\", \"likely_verified\"],\n  \"q_keywords\": \"jefe de compras OR encargado de compras OR responsable de compras OR purchasing manager OR abastecimiento\",\n  \"organization_num_employees_range\": [\"50-100\", \"100-200\", \"200-500\", \"500-1000\"],\n  \"organization_industry_tag_ids\": [\"5567e0e77369642d5f080000\", \"5567e0e77369642d5f0c0000\", \"5567e0e77369642d5f1e0000\", \"5567e0e77369642d5f220000\"],\n  \"per_page\": 100,\n  \"page\": 1\n}) }}",
+        "options": {}
+      },
+      "id": "apollo-search",
+      "name": "Apollo - Buscar Contactos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transformar respuesta de Apollo a formato Rosecal\nconst people = $input.first().json.people || [];\n\nreturn people.map(person => {\n  const org = person.organization || {};\n  \n  return {\n    json: {\n      empresa: org.name || '',\n      rubro: org.industry || '',\n      zona: org.city ? org.city + ', ' + org.country : (org.country || 'Argentina'),\n      empleados_aprox: org.employee_count ? org.employee_count.toString() : '',\n      web: org.website_url || '',\n      nombre_contacto: (person.first_name || '') + ' ' + (person.last_name || ''),\n      cargo_contacto: person.title || '',\n      email_contacto: person.email || '',\n      telefono_empresa: org.phone || '',\n      estado: person.email ? 'pendiente' : 'sin_email',\n      email_enviado_1: '',\n      email_enviado_2: '',\n      email_enviado_3: '',\n      fecha_ultimo_contacto: '',\n      fecha_respuesta: '',\n      categoria_respuesta: '',\n      resumen_respuesta: '',\n      accion_sugerida: '',\n      urgencia: '',\n      fecha_futura: '',\n      notas_call: 'Importado desde Apollo.io - ' + DateTime.now().toFormat('yyyy-MM-dd'),\n      call_resultado: '',\n      call_detalle: '',\n      proxima_accion: '',\n      fecha_proximo_contacto: '',\n      _apollo_id: person.id\n    }\n  };\n}).filter(item => item.json.empresa && item.json.nombre_contacto.trim());"
+      },
+      "id": "transform-data",
+      "name": "Transformar Datos Apollo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columnMapping": {
+          "email_contacto": "={{ $json.email_contacto }}"
+        }
+      },
+      "id": "check-duplicate",
+      "name": "Verificar Duplicados",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "is-new-lead",
+      "name": "¿Es Lead Nuevo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "prompt": "=Validá si este cargo es del área de compras o abastecimiento.\n\nCargo: {{ $json.cargo_contacto }}\nEmpresa: {{ $json.empresa }}\n\nRespondé SOLO con un JSON:\n{\n  \"es_compras\": true/false,\n  \"confianza\": \"alta/media/baja\",\n  \"razon\": \"breve explicación\"\n}"
+      },
+      "id": "ai-validate",
+      "name": "AI - Validar Cargo",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parsear validación de IA\nconst aiResponse = $input.first().json.text || '{}';\n\ntry {\n  const parsed = JSON.parse(aiResponse.replace(/```json\\s*|\\s*```/g, ''));\n  const esCompras = parsed.es_compras === true;\n  \n  return [{\n    json: {\n      ...$input.first().json,\n      estado: esCompras ? 'pendiente' : 'no_es_compras',\n      notas_call: parsed.razon || ''\n    }\n  }];\n} catch (e) {\n  // Si falla, mantener como pendiente\n  return [{\n    json: {\n      ...$input.first().json,\n      estado: 'pendiente',\n      notas_call: 'Error validando cargo'\n    }\n  }];\n}"
+      },
+      "id": "parse-validation",
+      "name": "Parsear Validación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMap"
+        }
+      },
+      "id": "add-to-sheets",
+      "name": "Agregar a Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMap",
+          "value": {
+            "notas_call": "=Encontrado nuevamente en Apollo el {{ DateTime.now().toFormat('yyyy-MM-dd') }}"
+          },
+          "matchingColumns": ["email_contacto"]
+        }
+      },
+      "id": "update-duplicate",
+      "name": "Actualizar Duplicado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.EMAIL_NOTIFICACIONES }}",
+        "subject": "=✅ Apollo - Nuevos leads importados",
+        "body": "=Se completó la búsqueda en Apollo.io\n\nResumen de la importación:\n- Total encontrados: {{ $json.length }}\n- Nuevos agregados: {{ $json.filter(l => l.json.estado === 'pendiente').length }}\n- Descartados (no son compras): {{ $json.filter(l => l.json.estado === 'no_es_compras').length }}\n\nEstado: Listos para la secuencia de emails\n\nVer en Sheets: https://docs.google.com/spreadsheets/d/{{ $env.GOOGLE_SHEETS_ID }}",
+        "options": {}
+      },
+      "id": "notify-results",
+      "name": "Notificar Resultados",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1850, 200]
+    }
+  ],
+  "connections": {
+    "Schedule - Semanal Lunes 10AM": {
+      "main": [
+        [
+          {
+            "node": "Apollo - Buscar Contactos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apollo - Buscar Contactos": {
+      "main": [
+        [
+          {
+            "node": "Transformar Datos Apollo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transformar Datos Apollo": {
+      "main": [
+        [
+          {
+            "node": "Verificar Duplicados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Duplicados": {
+      "main": [
+        [
+          {
+            "node": "¿Es Lead Nuevo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es Lead Nuevo?": {
+      "main": [
+        [
+          {
+            "node": "AI - Validar Cargo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Actualizar Duplicado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Validar Cargo": {
+      "main": [
+        [
+          {
+            "node": "Parsear Validación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Validación": {
+      "main": [
+        [
+          {
+            "node": "Agregar a Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agregar a Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Notificar Resultados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["rosecal", "apollo", "busqueda"]
+}

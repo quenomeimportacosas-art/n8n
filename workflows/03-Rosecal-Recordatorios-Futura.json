@@ -1,0 +1,158 @@
+{
+  "name": "Rosecal - 03 - Recordatorios Fecha Futura",
+  "nodes": [
+    {
+      "parameters": {
+        "event": "rowAddedOrUpdated",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "watchColumns": ["fecha_futura", "categoria_respuesta"]
+      },
+      "id": "sheets-trigger",
+      "name": "Trigger - Fecha Futura Agregada",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.fecha_futura }}",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-fecha",
+      "name": "¿Tiene Fecha Futura?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parsear la fecha futura y calcular recordatorio (30 días antes)\nconst fechaFuturaStr = $input.first().json.fecha_futura;\n\n// Intentar parsear varios formatos comunes\nlet fechaFutura;\nconst formats = ['dd/MM/yyyy', 'd/M/yyyy', 'yyyy-MM-dd', 'dd-MM-yyyy', 'd-M-yyyy'];\n\nfor (const fmt of formats) {\n  const parsed = DateTime.fromFormat(fechaFuturaStr, fmt);\n  if (parsed.isValid) {\n    fechaFutura = parsed;\n    break;\n  }\n}\n\n// Si no se pudo parsear, intentar desde ISO\nif (!fechaFutura) {\n  fechaFutura = DateTime.fromISO(fechaFuturaStr);\n}\n\n// Si todavía no es válida, usar 3 meses desde hoy\nif (!fechaFutura.isValid) {\n  fechaFutura = DateTime.now().plus({ months: 3 });\n}\n\n// Calcular fecha de recordatorio (30 días antes)\nconst fechaRecordatorio = fechaFutura.minus({ days: 30 });\n\n// Asegurar que no sea en el pasado\nconst fechaFinal = fechaRecordatorio < DateTime.now() ? DateTime.now().plus({ days: 1 }) : fechaRecordatorio;\n\nreturn [{\n  json: {\n    ...$input.first().json,\n    fecha_futura_parseada: fechaFutura.toFormat('yyyy-MM-dd'),\n    fecha_recordatorio: fechaFinal.toFormat('yyyy-MM-dd'),\n    fecha_recordatorio_iso: fechaFinal.toISO()\n  }\n}];"
+      },
+      "id": "calcular-fecha",
+      "name": "Calcular Fecha Recordatorio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendar": "primary",
+        "summary": "=🗓️ REUNIÓN Rosecal — {{ $json.empresa }} ({{ $json.fecha_futura_parseada }})",
+        "description": "=⚠️ RECORDATORIO: El lead {{ $json.nombre_contacto }} de {{ $json.empresa }} dijo que compran indumentaria en {{ $json.fecha_futura_parseada }}.\n\nDetalles del lead:\n- Empresa: {{ $json.empresa }}\n- Rubro: {{ $json.rubro }}\n- Contacto: {{ $json.nombre_contacto }}\n- Email: {{ $json.email_contacto }}\n- Teléfono: {{ $json.telefono_empresa }}\n- Zona: {{ $json.zona }}\n\nResumen de la respuesta:\n{{ $json.resumen_respuesta }}\n\nAcción sugerida: {{ $json.accion_sugerida }}\n\n---\n🔗 Ver en Sheets: https://docs.google.com/spreadsheets/d/{{ $env.GOOGLE_SHEETS_ID }}",
+        "start": "={{ $json.fecha_recordatorio_iso }}",
+        "end": "={{ DateTime.fromISO($json.fecha_recordatorio_iso).plus({ hours: 1 }).toISO() }}"
+      },
+      "id": "create-calendar",
+      "name": "Crear Evento Calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMap",
+          "value": {
+            "notas": "=Recordatorio creado para el {{ $json.fecha_recordatorio }} (30 días antes de {{ $json.fecha_futura_parseada }})"
+          },
+          "matchingColumns": ["email_contacto"]
+        }
+      },
+      "id": "update-notas",
+      "name": "Actualizar Notas en Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.EMAIL_NOTIFICACIONES }}",
+        "subject": "=✅ Recordatorio programado — {{ $json.empresa }}",
+        "body": "=Se programó un recordatorio para el lead:\n\nEmpresa: {{ $json.empresa }}\nContacto: {{ $json.nombre_contacto }}\n\nFecha de compra mencionada: {{ $json.fecha_futura_parseada }}\nFecha del recordatorio: {{ $json.fecha_recordatorio }} (30 días antes)\n\nEl evento fue creado en tu Google Calendar.\n\n---\n🔗 Ver en Sheets: https://docs.google.com/spreadsheets/d/{{ $env.GOOGLE_SHEETS_ID }}",
+        "options": {}
+      },
+      "id": "email-confirmation",
+      "name": "Confirmación Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1050, 450]
+    }
+  ],
+  "connections": {
+    "Trigger - Fecha Futura Agregada": {
+      "main": [
+        [
+          {
+            "node": "¿Tiene Fecha Futura?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Tiene Fecha Futura?": {
+      "main": [
+        [
+          {
+            "node": "Calcular Fecha Recordatorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Fecha Recordatorio": {
+      "main": [
+        [
+          {
+            "node": "Crear Evento Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Evento Calendar": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Notas en Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Confirmación Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["rosecal", "recordatorios", "calendar"]
+}

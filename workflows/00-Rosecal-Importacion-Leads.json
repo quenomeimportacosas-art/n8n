@@ -1,0 +1,182 @@
+{
+  "name": "Rosecal - 00 - Importación de Leads",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Este workflow se ejecuta manualmente subiendo un CSV\n// Formato esperado del CSV (exportado de Apollo o Evaboot):\n// empresa, rubro, zona, web, telefono, nombre_contacto, cargo_contacto, email_contacto\n\nreturn [{\n  json: {\n    mensaje: \"Subí tu CSV usando el nodo 'Read Binary Files' o ejecutá este workflow después de subir el archivo a una carpeta\"\n  }\n}];"
+      },
+      "id": "manual-start",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "read-csv",
+      "name": "Leer CSV de Leads",
+      "type": "n8n-nodes-base.readBinaryFiles",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "convertToJson",
+        "options": {
+          "headerRow": true,
+          "delimiter": ","
+        }
+      },
+      "id": "convert-csv",
+      "name": "Convertir CSV a JSON",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Limpiar y transformar datos del CSV\nconst rows = $input.all()[0].json.data || $input.all();\n\nreturn rows.map(row => {\n  // Normalizar campos\n  const email = (row.email || row.Email || row.email_contacto || '').toLowerCase().trim();\n  const nombre = (row.nombre || row.Nombre || row.nombre_contacto || row.first_name || '').trim();\n  const empresa = (row.empresa || row.Empresa || row.company || row.organization || '').trim();\n  const cargo = (row.cargo || row.Cargo || row.title || row.cargo_contacto || '').toLowerCase();\n  const telefono = (row.telefono || row.Teléfono || row.phone || row.telefono_empresa || '').trim();\n  const web = (row.web || row.Web || row.website || row.Website || '').trim();\n  const rubro = (row.rubro || row.Rubro || row.industry || row.Industry || 'Otros').trim();\n  const zona = (row.zona || row.Zona || row.location || row.Location || 'Argentina').trim();\n  \n  // Detectar si el cargo es de compras\n  const isCompras = /compras|abastecimiento|purchasing|supply|adquisiciones/i.test(cargo);\n  \n  return {\n    json: {\n      empresa: empresa,\n      rubro: rubro,\n      zona: zona,\n      empleados_aprox: row.empleados || row['# employees'] || '',\n      web: web,\n      nombre_contacto: nombre,\n      cargo_contacto: cargo,\n      email_contacto: email,\n      telefono_empresa: telefono,\n      estado: isCompras ? 'pendiente' : 'verificar_cargo',\n      email_enviado_1: '',\n      email_enviado_2: '',\n      email_enviado_3: '',\n      fecha_ultimo_contacto: '',\n      fecha_respuesta: '',\n      categoria_respuesta: '',\n      resumen_respuesta: '',\n      accion_sugerida: '',\n      urgencia: '',\n      notas_call: isCompras ? '' : 'Cargo no claramente de compras - verificar',\n      origen: 'apollo_import_' + DateTime.now().toFormat('yyyy-MM-dd')\n    }\n  };\n}).filter(row => row.json.email_contacto && row.json.email_contacto.includes('@'));"
+      },
+      "id": "clean-data",
+      "name": "Limpiar y Transformar Datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "prompt": "=Analizá si este cargo es de área de compras, abastecimiento o similar.\n\nCargo: {{ $json.cargo_contacto }}\nEmpresa: {{ $json.empresa }}\n\nRespondé con un JSON:\n{\n  \"es_compras\": true/false,\n  \"confianza\": \"alta/media/baja\",\n  \"razon\": \"breve explicación\"\n}\n\nSi el cargo menciona compras, abastecimiento, purchasing, supply chain, adquisiciones, o similar, es de compras.\nSi es de finanzas, ventas, marketing, IT, no es de compras."
+      },
+      "id": "ai-validate-cargo",
+      "name": "AI - Validar Cargo Compras",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parsear respuesta de AI y actualizar estado\nconst aiResponse = $input.first().json.text || '{}';\n\ntry {\n  const parsed = JSON.parse(aiResponse.replace(/```json\\s*|\\s*```/g, ''));\n  const esCompras = parsed.es_compras === true || parsed.es_compras === 'true';\n  \n  return [{\n    json: {\n      ...$input.first().json,\n      estado: esCompras ? 'pendiente' : 'no_es_compras',\n      notas_call: (esCompras ? '' : 'Cargo: ') + parsed.razon || ''\n    }\n  }];\n} catch (e) {\n  // Si falla el parseo, mantener estado anterior\n  return [{\n    json: {\n      ...$input.first().json\n    }\n  }];\n}"
+      },
+      "id": "parse-validation",
+      "name": "Parsear Validación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMap"
+        }
+      },
+      "id": "add-to-sheets",
+      "name": "Agregar a Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.EMAIL_NOTIFICACIONES }}",
+        "subject": "=✅ Importación completada — Rosecal",
+        "body": "=Se completó la importación de leads.\n\nResumen:\n- Total procesados: {{ $json.length }}\n- Listos para enviar: {{ $json.filter(l => l.json.estado === 'pendiente').length }}\n- Requieren verificación: {{ $json.filter(l => l.json.estado !== 'pendiente').length }}\n\nVer en Sheets: https://docs.google.com/spreadsheets/d/{{ $env.GOOGLE_SHEETS_ID }}",
+        "options": {}
+      },
+      "id": "notify-import",
+      "name": "Notificar Importación",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1650, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Leer CSV de Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer CSV de Leads": {
+      "main": [
+        [
+          {
+            "node": "Convertir CSV a JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convertir CSV a JSON": {
+      "main": [
+        [
+          {
+            "node": "Limpiar y Transformar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpiar y Transformar Datos": {
+      "main": [
+        [
+          {
+            "node": "AI - Validar Cargo Compras",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Validar Cargo Compras": {
+      "main": [
+        [
+          {
+            "node": "Parsear Validación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Validación": {
+      "main": [
+        [
+          {
+            "node": "Agregar a Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agregar a Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Notificar Importación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["rosecal", "importacion", "leads"]
+}

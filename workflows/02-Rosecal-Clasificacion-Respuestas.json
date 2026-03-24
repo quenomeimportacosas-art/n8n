@@ -1,0 +1,321 @@
+{
+  "name": "Rosecal - 02 - Clasificación de Respuestas",
+  "nodes": [
+    {
+      "parameters": {
+        "event": "messageReceived",
+        "filters": {
+          "from": ["={{ $env.GMAIL_ADDRESS }}"]
+        },
+        "options": {
+          "downloadAttachments": false
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger - Nuevas Respuestas",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filtrar solo respuestas a nuestros emails de prospección\nconst subject = $input.first().json.subject || '';\nconst body = $input.first().json.text || '';\n\n// Verificar que sea respuesta a nuestros emails\nconst isReply = subject.includes('Re:') || subject.includes('RE:');\nconst isProspeccion = subject.toLowerCase().includes('indumentaria') || \n                      body.toLowerCase().includes('rosecal');\n\nif (!isReply || !isProspeccion) {\n  return []; // No procesar\n}\n\nreturn $input.all();"
+      },
+      "id": "filter-replies",
+      "name": "Filtrar Respuestas Prospección",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columnMapping": {
+          "email_contacto": "from"
+        }
+      },
+      "id": "find-lead",
+      "name": "Buscar Lead en Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "prompt": "=Sos asistente de ventas de Rosecal. Analizá esta respuesta a un email de prospección de indumentaria laboral.\n\nRESPUESTA RECIBIDA:\n{{ $json.text }}\n\nEMPRESA: {{ $json.empresa }} · CONTACTO: {{ $json.nombre_contacto }}\n\nClasificá en UNA categoría:\n- INTERESADO: quiere precio, reunión o más info\n- FECHA_FUTURA: compran en X semanas/meses, menciona fecha aproximada\n- DERIVA_CONTACTO: no es el indicado, te pasa a otra persona\n- TIENE_PROVEEDOR: ya trabajan con alguien pero no cierran la puerta\n- NO_INTERESADO: rechazo explícito\n- BOUNCE_SPAM: respuesta automática o email inválido\n\nOUTPUT - solo este JSON sin markdown ni backticks:\n{\n  \"categoria\": \"CATEGORIA\",\n  \"resumen\": \"máximo 20 palabras de qué dijo\",\n  \"nuevo_contacto\": \"nombre y email si derivó a alguien, sino null\",\n  \"fecha_futura\": \"fecha aproximada si la mencionó, sino null\",\n  \"accion\": \"llamar hoy / esperar / enviar info / archivar / agregar nuevo contacto\",\n  \"urgencia\": \"alta / media / baja\"\n}"
+      },
+      "id": "ai-classifier",
+      "name": "Claude - Clasificar Respuesta",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parsear la respuesta JSON de Claude\nconst aiResponse = $input.first().json.text || '{}';\n\ntry {\n  const parsed = JSON.parse(aiResponse);\n  return [{\n    json: {\n      ...$input.first().json,\n      categoria: parsed.categoria || 'DESCONOCIDO',\n      resumen: parsed.resumen || '',\n      nuevo_contacto: parsed.nuevo_contacto || null,\n      fecha_futura: parsed.fecha_futura || null,\n      accion: parsed.accion || 'revisar',\n      urgencia: parsed.urgencia || 'media'\n    }\n  }];\n} catch (e) {\n  return [{\n    json: {\n      ...$input.first().json,\n      categoria: 'ERROR_PARSE',\n      resumen: aiResponse.slice(0, 100),\n      accion: 'revisar manualmente',\n      urgencia: 'media'\n    }\n  }];\n}"
+      },
+      "id": "parse-json",
+      "name": "Parsear JSON Respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMap",
+          "value": {
+            "estado": "respondio",
+            "categoria_respuesta": "={{ $json.categoria }}",
+            "resumen_respuesta": "={{ $json.resumen }}",
+            "accion_sugerida": "={{ $json.accion }}",
+            "urgencia": "={{ $json.urgencia }}",
+            "fecha_respuesta": "={{ DateTime.now().toISO() }}"
+          },
+          "matchingColumns": ["email_contacto"]
+        }
+      },
+      "id": "update-sheets",
+      "name": "Actualizar Lead en Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.categoria }}",
+              "rightValue": "INTERESADO",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-interesado",
+      "name": "¿Es Interesado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "resource": "chat",
+        "sessionId": "={{ DateTime.now().toMillis() }}",
+        "content": "=🟢 **{{ $json.categoria }}** — {{ $json.empresa }}\n\nContacto: {{ $json.nombre_contacto }} ({{ $json.email_contacto }})\n\nDijo: \"{{ $json.resumen }}\"\n\n→ **{{ $json.accion }}** · Urgencia: {{ $json.urgencia }}\n\n📞 {{ $json.telefono_empresa }}"
+      },
+      "id": "whatsapp-notify",
+      "name": "Notificación WhatsApp",
+      "type": "n8n-nodes-base.whatsapp",
+      "typeVersion": 1,
+      "position": [1700, 150]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.EMAIL_NOTIFICACIONES }}",
+        "subject": "=🟢 LEAD INTERESADO — {{ $json.empresa }}",
+        "body": "=Categoría: {{ $json.categoria }}\n\nEmpresa: {{ $json.empresa }}\nContacto: {{ $json.nombre_contacto }}\nEmail: {{ $json.email_contacto }}\nTeléfono: {{ $json.telefono_empresa }}\n\nResumen: {{ $json.resumen }}\n\nAcción sugerida: {{ $json.accion }}\nUrgencia: {{ $json.urgencia }}\n\n---\nVer lead: https://docs.google.com/spreadsheets/d/{{ $env.GOOGLE_SHEETS_ID }}",
+        "options": {}
+      },
+      "id": "email-notify",
+      "name": "Notificación Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1700, 250]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.nuevo_contacto }}",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-derivacion",
+      "name": "¿Derivó Contacto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1450, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMap",
+          "value": {
+            "empresa": "={{ $json.empresa }}",
+            "rubro": "={{ $json.rubro }}",
+            "zona": "={{ $json.zona }}",
+            "nombre_contacto": "={{ $json.nuevo_contacto.split(' ')[0] + ' ' + $json.nuevo_contacto.split(' ')[1] }}",
+            "email_contacto": "={{ $json.nuevo_contacto.match(/[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\.[a-zA-Z0-9._-]+/gi)?.[0] || '' }}",
+            "estado": "pendiente",
+            "notas": "=Derivado desde {{ $json.nombre_contacto }} - {{ $json.fecha_respuesta }}"
+          }
+        }
+      },
+      "id": "add-new-contact",
+      "name": "Agregar Nuevo Contacto",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1700, 400]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendar": "primary",
+        "summary": "=🗓️ Seguimiento Rosecal — {{ $json.empresa }}",
+        "description": "=Compran en: {{ $json.fecha_futura }}\n\nEmpresa: {{ $json.empresa }}\nContacto: {{ $json.nombre_contacto }}\nTeléfono: {{ $json.telefono_empresa }}\n\nResumen: {{ $json.resumen }}",
+        "start": "={{ $json.fecha_futura ? DateTime.fromFormat($json.fecha_futura, 'dd/MM/yyyy').minus({days: 30}).toISO() : DateTime.now().plus({months: 1}).toISO() }}",
+        "end": "={{ $json.fecha_futura ? DateTime.fromFormat($json.fecha_futura, 'dd/MM/yyyy').minus({days: 30}).plus({hours: 1}).toISO() : DateTime.now().plus({months: 1}).plus({hours: 1}).toISO() }}"
+      },
+      "id": "calendar-reminder",
+      "name": "Crear Recordatorio Calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [1450, 600]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger - Nuevas Respuestas": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Respuestas Prospección",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Respuestas Prospección": {
+      "main": [
+        [
+          {
+            "node": "Buscar Lead en Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Lead en Sheets": {
+      "main": [
+        [
+          {
+            "node": "Claude - Clasificar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude - Clasificar Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Parsear JSON Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear JSON Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Lead en Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Lead en Sheets": {
+      "main": [
+        [
+          {
+            "node": "¿Es Interesado?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Derivó Contacto?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Crear Recordatorio Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es Interesado?": {
+      "main": [
+        [
+          {
+            "node": "Notificación WhatsApp",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notificación Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Derivó Contacto?": {
+      "main": [
+        [
+          {
+            "node": "Agregar Nuevo Contacto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["rosecal", "respuestas", "clasificacion"]
+}
